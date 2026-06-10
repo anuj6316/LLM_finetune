@@ -1,0 +1,82 @@
+# ================================================================================
+#  Dataset Generator — Configuration File
+#  Edit this file to change model providers, paths, and generation parameters.
+#  All settings here override the script's built-in defaults.
+# ================================================================================
+
+
+# ── Generation Settings ─────────────────────────────────────────────────────────
+
+generation:
+  target_samples: 2500          # Total samples to generate
+  output_path: raw_dataset.jsonl
+  seed: 42                      # Random seed for reproducible combo shuffling
+  checkpoint_every: 25          # Save checkpoint every N accepted samples
+  concurrency: 4                # Max concurrent API calls (async)
+
+# ── Dataset Split Ratios ────────────────────────────────────────────────────────
+
+split:
+  train: 0.80
+  val:   0.10
+  # test is the remainder (1 - train - val)
+
+
+# ── Quality / Deduplication Thresholds ─────────────────────────────────────────
+
+quality:
+  max_stem_reuse: 8             # L2: same question stem allowed this many times across samples
+  max_stale_per_batch: 3        # L2: reject sample if > N stems are stale
+  jaccard_threshold: 0.60       # L3: within-sample near-duplicate ceiling (0.0–1.0)
+
+
+# ── Model Providers ─────────────────────────────────────────────────────────────
+#
+#  LiteLLM model string formats:
+#    Local / OpenAI-compatible : "openai/model-name"   (requires api_base)
+#    Anthropic                 : "anthropic/claude-3-haiku-20240307"
+#    OpenAI                    : "gpt-4o-mini"
+#    Google                    : "gemini/gemini-1.5-flash"
+#    Groq                      : "groq/llama3-8b-8192"
+#    Ollama                    : "ollama/llama3"        (requires api_base)
+#
+#  Leave api_base as null (or omit it) when using a cloud provider directly.
+# ──────────────────────────────────────────────────────────────────────────────
+
+models:
+
+  # Model used to generate Job Descriptions
+  jd_model:
+    name: "ollama/gemma4:31b-cloud"
+    # api_base: "http://172.16.20.85:5174/v1/"   # null for cloud providers
+    api_base: null
+    max_tokens: 950
+    temperature: 0.85
+
+  # Model used to generate Interview Questions
+  q_model:
+    name: "ollama/gemma4:31b-cloud"
+    api_base: null   # null for cloud providers
+    max_tokens: 1600
+    temperature: 0.85
+
+  # Retry settings (applied to both models)
+  retry:
+    max_attempts: 3             # Number of retry attempts on API failure
+    backoff_base: 2             # Exponential backoff base in seconds (2^attempt)
+
+
+# ── Paths ───────────────────────────────────────────────────────────────────────
+
+paths:
+  checkpoint: checkpoint.json
+
+
+# ── Question Distribution (must sum to 20) ──────────────────────────────────────
+
+question_distribution:
+  Technical:   7
+  Behavioral:  5
+  Situational: 4
+  Culture:     2
+  Career:      2

@@ -1,0 +1,31 @@
+{
+    "conversations": [
+        {
+            "role": "system",
+            "content": "You are an expert technical recruiter and hiring manager with 15+ years of experience across multiple industries. Given a job description, you generate targeted, insight-driven interview questions that help hiring teams assess both technical competence and cultural fit. Your questions are always specific to the role — never generic."
+        },
+        {
+            "role": "user",
+            "content": "Generate 20 interview questions for the following job description:\n\n**VP / Head of MLOps & LLMOps**\n\n**Company Overview**  \na leading AgriTech / CleanTech company is building intelligent systems to optimize crop productivity, resource efficiency, and climate-positive operations. We combine agronomic science, geospatial intelligence, IoT data, and generative AI to help farms, food producers, and sustainability teams make faster, better decisions.\n\n**About the Role**  \nWe are seeking a VP / Head of MLOps & LLMOps to own the company’s AI platform strategy, production machine learning operations, and enterprise-grade LLM infrastructure. This leader will build and scale the systems that move models from research to reliable field, edge, and cloud deployment. You will partner directly with the CEO, CTO, Product, Data Science, and Engineering teams to turn AI capability into measurable business and environmental impact. This is a hands-on executive role for someone who can define architecture, hire a high-performing team, and operate production AI systems at scale.\n\n**Key Responsibilities**  \n- Define and execute the MLOps, LLMOps, and AI platform roadmap across cloud, edge, and field-deployed environments.  \n- Build scalable model lifecycle processes covering experimentation, versioning, evaluation, deployment, monitoring, retraining, and governance.  \n- Lead architecture for LLM applications, RAG pipelines, vector search, inference optimization, observability, and safety controls.  \n- Establish production standards for ML systems, including CI/CD, infrastructure as code, security, cost management, and incident response.  \n- Partner with Data Science and Product to prioritize high-impact AI"
+        },
+        {
+            "role": "assistant",
+            "content": "1. [Technical] How would you design an AI platform roadmap across cloud, edge, and field-deployed environments?\n2. [Technical] What model lifecycle standards would you implement for experimentation, versioning, and evaluation?\n3. [Technical] Which observability metrics would you require for monitoring and retraining production ML systems?\n4. [Technical] How do you architect LLM applications with RAG pipelines and vector search?\n5. [Technical] What techniques would you use for inference optimization while maintaining safety controls?\n6. [Technical] How would you implement CI/CD and infrastructure as code for reproducible AI releases?\n7. [Technical] What security and cost-management practices would you put in place for production AI systems?\n8. [Behavioral] Tell me about a time you moved ML models from research to reliable field, edge, and cloud deployment.\n9. [Behavioral] Describe a situation where you built scalable model evaluation and governance processes for regulated or safety-sensitive AI.\n10. [Behavioral] Tell me about a time you led incident response for a production AI system affecting business operations.\n11. [Behavioral] Describe a situation where you partnered directly with Product and Data Science to prioritize high-impact AI work.\n12. [Behavioral] Tell me about a time you hired and scaled a high-performing MLOps or LLMOps team.\n13. [Situational] Imagine crop-yield models degrade after deployment due to changing weather patterns; how would you approach retraining and monitoring?\n14. [Situational] How would you approach building LLMOps governance for generative AI recommendations used by sustainability teams?\n15. [Situational] Imagine IoT data quality varies across farms; how would you approach model deployment standards for edge environments?\n16. [Situational] How would you approach reducing inference costs for enterprise-grade LLM infrastructure without hurting reliability?\n17. [Culture] How would you foster collaboration between agronomic science, geospatial intelligence, IoT, and generative AI teams?\n18. [Culture] What team dynamics would you create to balance hands-on architecture with executive accountability?\n19. [Career] Why are you motivated to lead MLOps and LLMOps in an AgriTech or CleanTech company?\n20. [Career] What growth are you seeking in a hands-on executive role partnering with the CEO and CTO?"
+        }
+    ],
+    "metadata": {
+        "domain": "MLOps / LLMOps",
+        "industry": "AgriTech / CleanTech",
+        "level": "VP / C-suite",
+        "company_size": "Growth Startup (50–200 employees)",
+        "quality_score": 100,
+        "q_counts": {
+            "[Technical]": 7,
+            "[Behavioral]": 5,
+            "[Situational]": 4,
+            "[Culture]": 2,
+            "[Career]": 2
+        },
+        "version": "3.2"
+    }
+}

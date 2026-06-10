@@ -1,34 +1,71 @@
 """
 ================================================================================
-  JD → 20 Interview Questions | Dataset Generator  v3.1
+  JD → 20 Interview Questions | Dataset Generator  v3.2
   Target : Gemma 4 E4B fine-tune via Unsloth (QLoRA)
   Format : ShareGPT JSONL  (Unsloth-native, production-ready)
 
-  v3.1 updates
+  v3.2 updates
   ────────────
+  ▸ config.yml support  — All tuneable settings live in config.yml.
   ▸ Centralized CONFIG  — No external JSON required.
   ▸ Robustness          — Native KeyboardInterrupt handling + API retries.
   ▸ Performance         — Pre-compiled regexes & fixed L3 version tracking.
 ================================================================================
 """
 
-import json, random, time, hashlib, re
+import asyncio, json, random, time, hashlib, re
 from pathlib import Path
 from collections import defaultdict, Counter
 import litellm
+
+try:
+    import yaml
+except ImportError:
+    yaml = None  # config.yml loading will be skipped gracefully
+
 litellm.set_verbose = False
+litellm.suppress_debug_info = True
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 0.  PATHS & TUNEABLE CONSTANTS
+# 0a. CONFIG LOADER
 # ══════════════════════════════════════════════════════════════════════════════
 
-CHECKPOINT_PATH     = "checkpoint.json"
-CHECKPOINT_EVERY    = 25        # save state every N accepted samples
-MAX_STEM_REUSE      = 8         # L2: same question stem allowed this many times
-MAX_STALE_PER_BATCH = 3         # L2: reject sample if > N stems are stale
-JACCARD_THRESHOLD   = 0.60      # L3: within-sample near-duplicate ceiling
-VERSION             = "3.1"
+def load_config(path: str = "config.yml") -> dict:
+    """Load config.yml if present and PyYAML is installed, else return {}."""
+    if yaml is None:
+        print("  ⚠️  PyYAML not installed — using built-in defaults. Run: pip install pyyaml")
+        return {}
+    cfg_path = Path(path)
+    if not cfg_path.exists():
+        print(f"  ⚠️  {path} not found — using built-in defaults.")
+        return {}
+    with open(cfg_path, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    print(f"  ✅  Loaded config from {path}")
+    return data
+
+
+_CFG = load_config()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 0b. PATHS & TUNEABLE CONSTANTS  (driven by config.yml, with defaults)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_paths   = _CFG.get("paths",   {})
+_quality = _CFG.get("quality", {})
+_gen     = _CFG.get("generation", {})
+_retry   = _CFG.get("models",  {}).get("retry", {})
+
+CHECKPOINT_PATH     = _paths.get("checkpoint",        "checkpoint.json")
+CHECKPOINT_EVERY    = _gen.get("checkpoint_every",    25)
+MAX_STEM_REUSE      = _quality.get("max_stem_reuse",  8)
+MAX_STALE_PER_BATCH = _quality.get("max_stale_per_batch", 3)
+JACCARD_THRESHOLD   = _quality.get("jaccard_threshold",   0.60)
+MAX_RETRY_ATTEMPTS  = _retry.get("max_attempts",      3)
+BACKOFF_BASE        = _retry.get("backoff_base",       2)
+VERSION             = "3.2"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -70,12 +107,14 @@ COMPANY_SIZES = [
     "Large Enterprise (1,000+ employees)",
 ]
 
-Q_DIST = {          # question type → required count
-    "[Technical]":   7,
-    "[Behavioral]":  5,
-    "[Situational]": 4,
-    "[Culture]":     2,
-    "[Career]":      2,
+# Question distribution — sourced from config.yml if present
+_qdist_cfg = _CFG.get("question_distribution", {})
+Q_DIST = {
+    "[Technical]":   _qdist_cfg.get("Technical",   7),
+    "[Behavioral]":  _qdist_cfg.get("Behavioral",  5),
+    "[Situational]": _qdist_cfg.get("Situational", 4),
+    "[Culture]":     _qdist_cfg.get("Culture",      2),
+    "[Career]":      _qdist_cfg.get("Career",       2),
 }
 
 STOP_WORDS = {
@@ -273,41 +312,44 @@ class DatasetGenerator:
         self.stats      = defaultdict(int)
         self.failed_log: list[dict[str, str]] = []
 
-    # ── LLM call (LiteLLM) ───────────────────────────────────────────────────
+    # ── LLM call (LiteLLM, async) ────────────────────────────────────────────
 
-    def _call(self, prompt: str, cfg: dict, max_tokens: int) -> str:
+    async def _acall(self, prompt: str, cfg: dict, max_tokens: int) -> str:
         kwargs = dict(
-            model    = cfg["model"],
-            messages = [{"role": "user", "content": prompt}],
-            max_tokens = max_tokens,
-            temperature = 0.85,
+            model       = cfg["model"],
+            messages    = [{"role": "user", "content": prompt}],
+            max_tokens  = cfg.get("max_tokens", max_tokens),
+            temperature = cfg.get("temperature", 0.85),
         )
         if cfg.get("api_base"):
             kwargs["api_base"] = cfg["api_base"]
-            
-            # Inject dummy API key if routing to custom openAI endpoints
-            # otherwise LiteLLM might raise an authentication validation error
+
             if kwargs["model"].startswith("openai/"):
                 kwargs["api_key"] = "dummy"
-                
-        # 3-Attempt exponential backoff retry loop
-        for attempt in range(3):
-            try:
-                r = litellm.completion(**kwargs)
-                return r.choices[0].message.content.strip()
-            except Exception as e:
-                if attempt == 2:
-                    raise e
-                time.sleep(2 ** attempt)
 
-    def _gen_jd(self, domain, industry, level, size, cfg) -> str:
-        return self._call(
+        for attempt in range(MAX_RETRY_ATTEMPTS):
+            try:
+                async with self.semaphore:
+                    r = await litellm.acompletion(**kwargs)
+                content = r.choices[0].message.content
+                if content is None:
+                    raise ValueError(
+                        f"LLM returned None content (finish_reason={r.choices[0].finish_reason})"
+                    )
+                return content.strip()
+            except Exception as e:
+                if attempt == MAX_RETRY_ATTEMPTS - 1:
+                    raise
+                await asyncio.sleep(BACKOFF_BASE ** attempt)
+
+    async def _gen_jd(self, domain, industry, level, size, cfg) -> str:
+        return await self._acall(
             JD_PROMPT.format(domain=domain, industry=industry, level=level, company_size=size),
             cfg, max_tokens=950,
         )
 
-    def _gen_questions(self, jd: str, cfg) -> str:
-        return self._call(Q_PROMPT.format(jd=jd), cfg, max_tokens=1600)
+    async def _gen_questions(self, jd: str, cfg) -> str:
+        return await self._acall(Q_PROMPT.format(jd=jd), cfg, max_tokens=1600)
 
     # ── validation ───────────────────────────────────────────────────────────
 
@@ -373,10 +415,10 @@ class DatasetGenerator:
 
     # ── checkpoint helpers ───────────────────────────────────────────────────
 
-    def _ckpt(self, generated, combo_idx, output_path, target, seed):
+    def _ckpt(self, generated, started, output_path, target, seed):
         self.checkpoint.save({
             "generated":       generated,
-            "combo_index":     combo_idx,
+            "started":         started,
             "repetition":      self.rep.to_dict(),
             "failed_log":      self.failed_log,
             "output_path":     output_path,
@@ -385,9 +427,9 @@ class DatasetGenerator:
         })
         print(f"  💾  Checkpoint → {generated} samples saved.")
 
-    # ── main generation loop ─────────────────────────────────────────────────
+    # ── main generation loop (async, concurrent) ─────────────────────────────
 
-    def generate(
+    async def generate(
         self,
         target:      int   = 2500,
         output_path: str   = "raw_dataset.jsonl",
@@ -397,6 +439,7 @@ class DatasetGenerator:
         jd_api_base: str | None = None,
         q_model:     str   = "anthropic/claude-3-haiku-20240307",
         q_api_base:  str | None = None,
+        concurrency: int   = 4,
     ) -> int:
 
         # build deterministic combo order
@@ -420,8 +463,12 @@ class DatasetGenerator:
             print(f"\n  ⏸  Checkpoint: {ckpt['generated']} / {ckpt['target_size']} done.")
             ans = input("     Resume? [y/n]: ").strip().lower()
             if ans == "y":
-                generated        = ckpt["generated"]
-                start_idx        = ckpt["combo_index"]
+                file_lines = 0
+                if Path(output_path).exists():
+                    with open(output_path, encoding="utf-8") as f:
+                        file_lines = sum(1 for _ in f if _.strip())
+                generated        = max(ckpt["generated"], file_lines)
+                start_idx        = ckpt.get("started", ckpt.get("combo_index", 0))
                 self.rep         = RepetitionTracker.from_dict(ckpt["repetition"])
                 self.failed_log  = ckpt.get("failed_log", [])
                 file_mode        = "a"
@@ -431,59 +478,57 @@ class DatasetGenerator:
                 print("  🔄  Starting fresh.\n")
 
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        combo_idx = start_idx
 
         # Local Configs based on params
         jd_cfg = {"model": jd_model, "api_base": jd_api_base}
         q_cfg  = {"model": q_model,  "api_base": q_api_base}
 
-        with open(output_path, file_mode, encoding="utf-8") as fout:
-            while generated < target and combo_idx < len(combos) * 2:
+        self.semaphore = asyncio.Semaphore(concurrency)
+        index_lock = asyncio.Lock()
+        write_lock = asyncio.Lock()
+        current_idx = start_idx
+        max_combos = len(combos) * 2
+
+        async def worker():
+            nonlocal current_idx, generated
+            while generated < target:
+                async with index_lock:
+                    if current_idx >= max_combos:
+                        break
+                    idx = current_idx
+                    current_idx += 1
+
+                ind, dom, lvl, sz = combos[idx % len(combos)]
                 try:
-                    ind, dom, lvl, sz = combos[combo_idx % len(combos)]
-                    combo_idx += 1
+                    jd = await self._gen_jd(dom, ind, lvl, sz, jd_cfg)
 
-                    # 1 ── generate JD
-                    jd = self._gen_jd(dom, ind, lvl, sz, jd_cfg)
-                    time.sleep(sleep)
-
-                    # 2 ── L1 JD dedup
                     if self.rep.is_dup_jd(jd):
                         self.stats["l1_dup"] += 1
                         continue
                     self.rep.register_jd(jd)
 
-                    # 3 ── generate questions
-                    qtext = self._gen_questions(jd, q_cfg)
-                    time.sleep(sleep)
+                    qtext = await self._gen_questions(jd, q_cfg)
 
-                    # 4 ── validate distribution
                     ok, reason = self._validate_dist(qtext)
                     if not ok:
                         self.stats["dist_fail"] += 1
                         self.failed_log.append({"reason": reason, "dom": dom})
                         continue
 
-                    # 5 ── L2 cross-sample staleness
                     ok, reason = self.rep.check_cross_sample(qtext)
                     if not ok:
                         self.stats["l2_stale"] += 1
                         continue
 
-                    # 6 ── L3 within-sample near-duplicate
                     ok, reason = self.rep.check_within_sample(qtext)
                     if not ok:
                         self.stats["l3_neardup"] += 1
                         self.failed_log.append({"reason": reason, "dom": dom})
                         continue
 
-                    # 7 ── register questions (update stem counter)
                     self.rep.register_questions(qtext)
-
-                    # 8 ── quality score
                     qscore = self._quality_score(jd, qtext)
 
-                    # 9 ── write
                     meta = {
                         "domain": dom, "industry": ind,
                         "level": lvl, "company_size": sz,
@@ -491,31 +536,38 @@ class DatasetGenerator:
                         "q_counts": {lbl: qtext.count(lbl) for lbl in Q_DIST},
                         "version": VERSION,
                     }
-                    fout.write(json.dumps(self._fmt(jd, qtext, meta), ensure_ascii=False) + "\n")
-                    fout.flush()
+                    line = json.dumps(self._fmt(jd, qtext, meta), ensure_ascii=False)
 
-                    generated += 1
-                    self.stats[f"ind:{ind}"] += 1
-                    self.stats[f"dom:{dom}"] += 1
-                    self.stats[f"lvl:{lvl}"] += 1
+                    async with write_lock:
+                        fout.write(line + "\n")
+                        fout.flush()
+                        generated += 1
+                        self.stats[f"ind:{ind}"] += 1
+                        self.stats[f"dom:{dom}"] += 1
+                        self.stats[f"lvl:{lvl}"] += 1
+                        print(
+                            f"  ✅  [{generated:>4}/{target}]  "
+                            f"Q={qscore:>3}  {dom:<35}  {ind:<30}  {lvl}"
+                        )
+                        if generated % CHECKPOINT_EVERY == 0:
+                            self._ckpt(generated, current_idx, output_path, target, seed)
 
-                    print(
-                        f"  ✅  [{generated:>4}/{target}]  "
-                        f"Q={qscore:>3}  {dom:<35}  {ind:<30}  {lvl}"
-                    )
-
-                    if generated % CHECKPOINT_EVERY == 0:
-                        self._ckpt(generated, combo_idx, output_path, target, seed)
-
-                except KeyboardInterrupt:
-                    print("\n\n  ⏸  KeyboardInterrupt caught. Saving checkpoint...")
-                    self._ckpt(generated, combo_idx, output_path, target, seed)
-                    return generated
                 except Exception as exc:
                     self.stats["api_err"] += 1
                     self.failed_log.append({"reason": str(exc), "dom": dom})
                     print(f"  ❌  {dom} / {ind}: {exc}")
-                    time.sleep(2)
+
+        with open(output_path, file_mode, encoding="utf-8") as fout:
+            workers = [asyncio.create_task(worker()) for _ in range(concurrency)]
+            try:
+                await asyncio.gather(*workers)
+            except asyncio.CancelledError:
+                for w in workers:
+                    w.cancel()
+                await asyncio.gather(*workers, return_exceptions=True)
+                self._ckpt(generated, current_idx, output_path, target, seed)
+                print(f"  ⏸  KeyboardInterrupt — checkpoint saved.\n")
+                return generated
 
         self.checkpoint.clear()
         print(f"\n{'─'*60}")
@@ -646,34 +698,39 @@ Fine-tuning Gemma 4 E4B via Unsloth QLoRA for automated interview-question gener
 # ══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    
+
+    _m   = _CFG.get("models",     {})
+    _jd  = _m.get("jd_model",    {})
+    _q   = _m.get("q_model",     {})
+    _gen = _CFG.get("generation", {})
+    _spl = _CFG.get("split",      {})
+
     CONFIG = {
-        "target_samples": 2500,
-        "output_path":    "raw_dataset.jsonl",
-        "sleep_time":     0.6,
-        "seed":           42,
-        "train_split":    0.80,
-        "val_split":      0.10,
-        
-        # ── Model Configuration ──
-        # Updated to route to your local instance.
-        # Note: litellm requires custom openAI endpoints to have the "openai/" prefix.
-        # "local-model" can be replaced by the exact model name hosted on your server if required.
-        "jd_model":       "openai/local-model",
-        "jd_api_base":    "http://172.16.20.85:5174/v1/",  # /v1 is required by most local inference servers 
-        
-        "q_model":        "openai/local-model",
-        # http://172.16.20.85:5174/v1/chat/completions
-        "q_api_base":     "http://172.16.20.85:5174/v1/",
+        "target_samples": _gen.get("target_samples", 2500),
+        "output_path":    _gen.get("output_path",    "raw_dataset.jsonl"),
+        "sleep_time":     _gen.get("sleep_time",     0.6),
+        "seed":           _gen.get("seed",           42),
+        "concurrency":    _gen.get("concurrency",    4),
+
+        "train_split":    _spl.get("train", 0.80),
+        "val_split":      _spl.get("val",   0.10),
+
+        "jd_model":       _jd.get("name",     "openai/local-model"),
+        "jd_api_base":    _jd.get("api_base", "http://172.16.20.85:5174/v1/"),
+
+        "q_model":        _q.get("name",      "openai/local-model"),
+        "q_api_base":     _q.get("api_base",  "http://172.16.20.85:5174/v1/"),
     }
 
     gen = DatasetGenerator()
 
     print(f"\n🚀 Starting generation: targeting {CONFIG['target_samples']} samples...")
-    print(f"   JD Model: {CONFIG['jd_model']} | Q Model: {CONFIG['q_model']}\n")
-    print(f"   Connecting to API Base: {CONFIG['jd_api_base']}\n")
+    print(f"   JD Model : {CONFIG['jd_model']}")
+    print(f"   Q  Model : {CONFIG['q_model']}")
+    print(f"   API Base : {CONFIG['jd_api_base']}")
+    print(f"   Concurrency : {CONFIG['concurrency']}\n")
 
-    gen.generate(
+    asyncio.run(gen.generate(
         target      = CONFIG["target_samples"],
         output_path = CONFIG["output_path"],
         sleep       = CONFIG["sleep_time"],
@@ -682,7 +739,8 @@ if __name__ == "__main__":
         jd_api_base = CONFIG["jd_api_base"],
         q_model     = CONFIG["q_model"],
         q_api_base  = CONFIG["q_api_base"],
-    )
+        concurrency = CONFIG["concurrency"],
+    ))
 
     analyse(CONFIG["output_path"])
 

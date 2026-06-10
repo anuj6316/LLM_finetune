@@ -13,16 +13,16 @@ tags:
 
 # JD → Interview Questions Dataset
 
-Generated with `dataset_generator.py` v3.1.
+Generated with `dataset_generator.py` v3.2.
 
 ## Stats
 
 | Split | Samples |
 |-------|---------|
-| Train | 78 |
-| Val   | 9 |
-| Test  | 11 |
-| **Total** | **98** |
+| Train | 112 |
+| Val   | 14 |
+| Test  | 15 |
+| **Total** | **141** |
 
 ## Format
 
