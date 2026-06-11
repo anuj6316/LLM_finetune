@@ -637,11 +637,14 @@ def split(
         "val.jsonl":   data[t_cut:v_cut],
         "test.jsonl":  data[v_cut:],
     }
+    # Determine output directory based on src path
+    src_dir = Path(src).parent
     for fname, subset in splits.items():
-        with open(fname, "w", encoding="utf-8") as f:
+        out_path = src_dir / fname
+        with open(out_path, "w", encoding="utf-8") as f:
             for item in subset:
                 f.write(json.dumps(item, ensure_ascii=False) + "\n")
-        print(f"  {fname:<15} {len(subset):>5} samples")
+        print(f"  {out_path!s:<25} {len(subset):>5} samples")
 
     _write_card(n, splits)
 
@@ -689,8 +692,10 @@ Each record has `conversations` (system · user · assistant) and `metadata`.
 
 Fine-tuning Gemma 4 E4B via Unsloth QLoRA for automated interview-question generation.
 """
-    Path("README.md").write_text(card, encoding="utf-8")
-    print("  README.md        dataset card written")
+    # Write README to the same directory as the split files
+    readme_path = src_dir / "README.md"
+    Path(readme_path).write_text(card, encoding="utf-8")
+    print(f"  {readme_path!s:<25} dataset card written")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

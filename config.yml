@@ -9,7 +9,7 @@
 
 generation:
   target_samples: 2500          # Total samples to generate
-  output_path: raw_dataset.jsonl
+  output_path: dataset/raw/raw_dataset.jsonl
   seed: 42                      # Random seed for reproducible combo shuffling
   checkpoint_every: 25          # Save checkpoint every N accepted samples
   concurrency: 4                # Max concurrent API calls (async)
@@ -69,7 +69,7 @@ models:
 # ── Paths ───────────────────────────────────────────────────────────────────────
 
 paths:
-  checkpoint: checkpoint.json
+  checkpoint: dataset/backup/checkpoint.json
 
 
 # ── Question Distribution (must sum to 20) ──────────────────────────────────────
