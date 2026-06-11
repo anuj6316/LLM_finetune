@@ -19,10 +19,10 @@ Generated with `dataset_generator.py` v3.2.
 
 | Split | Samples |
 |-------|---------|
-| Train | 112 |
-| Val   | 14 |
-| Test  | 15 |
-| **Total** | **141** |
+| Train | 1487 |
+| Val   | 185 |
+| Test  | 187 |
+| **Total** | **1859** |
 
 ## Format
 

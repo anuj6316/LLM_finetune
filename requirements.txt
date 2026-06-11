@@ -1,2 +1,9 @@
 PyYAML
 litellm
+pandas
+matplotlib
+seaborn
+scikit-learn
+
+transformers
+huggingface_hub
