@@ -1,0 +1,12 @@
+{
+  "generated": 0,
+  "started": 4,
+  "repetition": {
+    "jd_fps": [],
+    "stem_counter": {}
+  },
+  "failed_log": [],
+  "output_path": "raw_dataset.jsonl",
+  "target_size": 2500,
+  "shuffle_seed": 42
+}
